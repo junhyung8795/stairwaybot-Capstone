@@ -39,7 +39,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import torch
-
+import serial  
+import json
+# ser = serial.Serial('/dev/cu.usbmodem101', 9600)
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -67,12 +69,15 @@ from utils.general import (
     xyxy2xywh,
 )
 from utils.torch_utils import select_device, smart_inference_mode
-
+theta_degrees = 0
+vertical_distance = 0 
 def calculate_slope(pt1, pt2):
     if pt2[0] - pt1[0] == 0:
         return float('inf')  # 기울기가 무한대인 경우
     return (pt2[1] - pt1[1]) / (pt2[0] - pt1[0])
+
 @smart_inference_mode()
+
 def run(
     weights=ROOT / "yolov5s.pt",  # model path or triton URL
     source=ROOT / "data/images",  # file/dir/URL/glob/screen/0(webcam)
@@ -102,13 +107,16 @@ def run(
     half=False,  # use FP16 half-precision inference
     dnn=False,  # use OpenCV DNN for ONNX inference
     vid_stride=1,  # video frame-rate stride
-):
+):  
+    global theta_degrees
+    global vertical_distance
     source = str(source)
     save_img = not nosave and not source.endswith(".txt")  # save inference images
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
     is_url = source.lower().startswith(("rtsp://", "rtmp://", "http://", "https://"))
     webcam = source.isnumeric() or source.endswith(".streams") or (is_url and not is_file)
     screenshot = source.lower().startswith("screen")
+    
     if is_url and is_file:
         source = check_file(source)  # download
 
@@ -201,10 +209,12 @@ def run(
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
 
-                
+            # theta_degrees = 0
+            # vertical_distance = 0
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
+                cv2.putText(im0, "detected", (im0.shape[1] - 500,im0.shape[0] - 50),  cv2.FONT_ITALIC, 2.0, (255, 0, 0), 3)
 
                 # Print results
                 for c in det[:, 5].unique():
@@ -236,8 +246,9 @@ def run(
                         bounding_box_center_x = int((xyxy[0] + xyxy[2]) / 2)
                         # bounding_box_length_x = xyxy[2] - xyxy[0]
                         bounding_box_length_y = xyxy[3] - xyxy[1]
-                        gap_y = int(bounding_box_length_y / 3)
-                        ROI = imc[int(xyxy[1]) + gap_y:int(xyxy[3]) - gap_y, int(xyxy[0]):int(xyxy[3])]
+                        gap_y = int(bounding_box_length_y / 4)
+                        ROI = imc[int(xyxy[1] + gap_y * 3) :int(xyxy[3] ), int(xyxy[0]):int(xyxy[2])]
+                        # ROI = imc[int(xyxy[1]):int(xyxy[3]), int(xyxy[0]):int(xyxy[2])]
                         gray_img = cv2.cvtColor(ROI, cv2.COLOR_BGR2GRAY)
                         canny_img = cv2.Canny(gray_img, 160, 480, apertureSize = 3, L2gradient = True)
                         lines = cv2.HoughLinesP(canny_img, 1, np.pi/180, 180, minLineLength = 150, maxLineGap = 4)
@@ -265,19 +276,21 @@ def run(
                             # slope는 위에서 계산한 직선의 기울기
                             theta_radians = math.atan(slope)
                             theta_degrees = math.degrees(theta_radians)
-
+                            # cv2.putText(im0, "degree:{}".format(str(theta_degrees)), (im0.shape[1] - 500,im0.shape[0] - 100),  cv2.FONT_ITALIC, 2.0, (255, 0, 0), 3)
+            
                             print("Angle in radians:", theta_radians)
                             print("Angle in degrees:", theta_degrees)
                             for line in lines:
                                 x1, y1, x2, y2 = line[0]
                                 cv2.line(hough_img, (x1, y1), (x2, y2), (0, 0, 255), 2, cv2.LINE_AA)
-                            cv2.imshow("hough_img", hough_img)
-                            cv2.waitKey(0)  # 0 밀리초 동안 대기 (무한 대기)
-                            cv2.destroyAllWindows()  # 창 닫기
+                            # cv2.imshow("hough_img", hough_img)
+                            # cv2.waitKey(0)  # 0 밀리초 동안 대기 (무한 대기)
+                            # cv2.destroyAllWindows()  # 창 닫기
                         
                                 
                     
                         #  Print width pixel count
+                                                    
 
                         y_pixel = (im_height - bounding_box_center_base)
                         x_pixel = abs(int((im_width / 2) - bounding_box_center_x))
@@ -286,18 +299,26 @@ def run(
                         result_degrees = math.degrees(result_radians)
                         print("역탄젠트 (도):", result_degrees)
                         sin_value = math.sin(result_radians)
-                        total_pixel = y_pixel / sin_value
-                        total_distance = total_pixel *(total_pixel * 0.00073 - 0.05057)
+                        # total_pixel = y_pixel / sin_value
+                        # total_distance = total_pixel *(total_pixel * 0.00073 - 0.05057)
+                        # vertical_distance = total_distance * sin_value
+                        vertical_distance = y_pixel * (y_pixel * 0.0012 - 0.728)
+                        print(vertical_distance)
+                        cv2.putText(im0, "distance:{}cm".format(str(vertical_distance)), (50,100),  cv2.FONT_ITALIC, 1.2, (255, 0, 0), 2)
+                        # if im_width / 2 - bounding_box_center_x > 10:
+                        #     cv2.putText(im0, "Go left", (im0.shape[1] - 500,im0.shape[0]),  cv2.FONT_ITALIC, 2, (255, 0, 0), 2)
+                        # JSON 데이터 생성
+                        # data = {"distance": float(vertical_distance), "degree": float(theta_degrees)}
 
-                        print(f"y distance = {y_pixel} and x distance = {x_pixel} and total distance = {total_distance}")
-                        
+                        # JSON 데이터를 문자열로 변환하여 시리얼 포트로 전송
+                        # ser.write(json.dumps(data).encode())
                         
 
                         
 
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / "crops" / names[c] / f"{p.stem}.jpg", BGR=True)
-
+            cv2.putText(im0, "degree:{}".format(str(theta_degrees)), (im0.shape[1] - 500,im0.shape[0] - 100),  cv2.FONT_ITALIC, 2.0, (255, 0, 0), 3)
             # Stream results
             im0 = annotator.result()
             if view_img:
@@ -306,7 +327,8 @@ def run(
                     cv2.namedWindow(str(p), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
                     cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
                 cv2.imshow(str(p), im0)
-                cv2.waitKey(1)  # 1 millisecond
+                
+                cv2.waitKey(1)  
 
             # Save results (image with detections)
             if save_img:
