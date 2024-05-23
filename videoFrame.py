@@ -247,11 +247,11 @@ def run(
                         # bounding_box_length_x = xyxy[2] - xyxy[0]
                         bounding_box_length_y = xyxy[3] - xyxy[1]
                         gap_y = int(bounding_box_length_y / 4)
-                        ROI = imc[int(xyxy[1] + gap_y * 3) :int(xyxy[3] ), int(xyxy[0]):int(xyxy[2])]
+                        ROI = imc[int(xyxy[1] + gap_y * 2) :int(xyxy[3] - gap_y), int(xyxy[0]):int(xyxy[2])]
                         # ROI = imc[int(xyxy[1]):int(xyxy[3]), int(xyxy[0]):int(xyxy[2])]
                         gray_img = cv2.cvtColor(ROI, cv2.COLOR_BGR2GRAY)
-                        canny_img = cv2.Canny(gray_img, 160, 480, apertureSize = 3, L2gradient = True)
-                        lines = cv2.HoughLinesP(canny_img, 1, np.pi/180, 180, minLineLength = 150, maxLineGap = 4)
+                        canny_img = cv2.Canny(gray_img, 100, 300, apertureSize = 3, L2gradient = True)
+                        lines = cv2.HoughLinesP(canny_img, 1, np.pi/180, 180, minLineLength = 100, maxLineGap = 10)
                         hough_img = cv2.cvtColor(canny_img, cv2.COLOR_GRAY2BGR)
                         
                         # if lines is not None:
@@ -260,32 +260,34 @@ def run(
                         #         pt2 = (lines[j][0][2], lines[j][0][2])
                         #         cv2.line(hough_img, pt1, pt2, (0,0,255), 2 , cv2.LINE_AA)
                         if lines is not None:
-                            # Get the last line in the 'lines' array
-                            last_line = lines[-1][0]
-
-                            # Extract coordinates of the last line
-                            x1, y1, x2, y2 = last_line
-
-                            # Calculate the slope of the last line
-                            if x2 - x1 == 0:
-                                slope = float('inf')  # Handle the case where the denominator is zero (vertical line)
-                            else:
-                                slope = (y2 - y1) / (x2 - x1) * (-1)
-
-                            print("Slope of the last line:", slope)
+                            for u in range(len(lines) - 1, -1, -1):
+                                # Get the last line in the 'lines' array
+                                current_line = lines[u][0]
+                                # Extract coordinates of the last line
+                                x1, y1, x2, y2 = current_line
+                                if x2 - x1 != 0:
+                                    slope = (y2 - y1) / (x2 - x1) * (-1)
+                                    print("Slope of the last line:", slope)
+                                    theta_radians = math.atan(slope)
+                                    theta_degrees = math.degrees(theta_radians)
+                                    print("Angle in radians:", theta_radians)
+                                    print("Angle in degrees:", theta_degrees)
+                                    cv2.line(hough_img, (x1, y1), (x2, y2), (0, 0, 255), 2, cv2.LINE_AA)
+                                    break
+                            
                             # slope는 위에서 계산한 직선의 기울기
-                            theta_radians = math.atan(slope)
-                            theta_degrees = math.degrees(theta_radians)
+                            # theta_radians = math.atan(slope)
+                            # theta_degrees = math.degrees(theta_radians)
                             # cv2.putText(im0, "degree:{}".format(str(theta_degrees)), (im0.shape[1] - 500,im0.shape[0] - 100),  cv2.FONT_ITALIC, 2.0, (255, 0, 0), 3)
             
-                            print("Angle in radians:", theta_radians)
-                            print("Angle in degrees:", theta_degrees)
-                            for line in lines:
-                                x1, y1, x2, y2 = line[0]
-                                cv2.line(hough_img, (x1, y1), (x2, y2), (0, 0, 255), 2, cv2.LINE_AA)
-                            # cv2.imshow("hough_img", hough_img)
-                            # cv2.waitKey(0)  # 0 밀리초 동안 대기 (무한 대기)
-                            # cv2.destroyAllWindows()  # 창 닫기
+                            # print("Angle in radians:", theta_radians)
+                            # print("Angle in degrees:", theta_degrees)
+                            # for line in lines:
+                            #     x1, y1, x2, y2 = line[0]
+                            # cv2.line(hough_img, (x1, y1), (x2, y2), (0, 0, 255), 2, cv2.LINE_AA)
+                        # cv2.imshow("hough_img", hough_img)
+                        # cv2.waitKey(0)  # 0 밀리초 동안 대기 (무한 대기)
+                        # cv2.destroyAllWindows()  # 창 닫기
                         
                                 
                     
@@ -302,9 +304,11 @@ def run(
                         # total_pixel = y_pixel / sin_value
                         # total_distance = total_pixel *(total_pixel * 0.00073 - 0.05057)
                         # vertical_distance = total_distance * sin_value
-                        vertical_distance = y_pixel * (y_pixel * 0.0012 - 0.728)
+                        # vertical_distance = y_pixel * (y_pixel * 0.0012 - 0.728)
+                        vertical_distance = y_pixel * (y_pixel * 0.000085)
+
                         print(vertical_distance)
-                        cv2.putText(im0, "distance:{}cm".format(str(vertical_distance)), (50,100),  cv2.FONT_ITALIC, 1.2, (255, 0, 0), 2)
+                        cv2.putText(im0, "distance:{}cm".format(str(vertical_distance)), (im0.shape[1] - 700,im0.shape[0] - 150),  cv2.FONT_ITALIC, 1.2, (255, 0, 0), 2)
                         # if im_width / 2 - bounding_box_center_x > 10:
                         #     cv2.putText(im0, "Go left", (im0.shape[1] - 500,im0.shape[0]),  cv2.FONT_ITALIC, 2, (255, 0, 0), 2)
                         # JSON 데이터 생성
