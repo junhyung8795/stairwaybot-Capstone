@@ -37,7 +37,7 @@ from pathlib import Path
 import math
 import matplotlib.pyplot as plt
 import numpy as np
-
+from multiprocessing import Queue
 import torch
 import serial  
 import json
@@ -71,12 +71,22 @@ from utils.general import (
 from utils.torch_utils import select_device, smart_inference_mode
 theta_degrees = 0
 vertical_distance = 0 
+im0 = 0
 def calculate_slope(pt1, pt2):
     if pt2[0] - pt1[0] == 0:
         return float('inf')  # 기울기가 무한대인 경우
     return (pt2[1] - pt1[1]) / (pt2[0] - pt1[0])
 
 @smart_inference_mode()
+
+# class detection_results:
+#     def __init__(self, im0, theta_degrees, vertical_distance):
+#         self.im0 = im0
+#         self.theta_degrees = theta_degrees
+#         self.vertical_distance = vertical_distance
+
+# def get_results():
+#     return detection_results(im0, theta_degrees, vertical_distance)
 
 def run(
     weights=ROOT / "yolov5s.pt",  # model path or triton URL
@@ -107,9 +117,11 @@ def run(
     half=False,  # use FP16 half-precision inference
     dnn=False,  # use OpenCV DNN for ONNX inference
     vid_stride=1,  # video frame-rate stride
+    queue = []
 ):  
     global theta_degrees
     global vertical_distance
+    global im0
     source = str(source)
     save_img = not nosave and not source.endswith(".txt")  # save inference images
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
@@ -117,6 +129,9 @@ def run(
     webcam = source.isnumeric() or source.endswith(".streams") or (is_url and not is_file)
     screenshot = source.lower().startswith("screen")
     
+    def lets_return():
+        yield im0, vertical_distance, theta_degrees
+
     if is_url and is_file:
         source = check_file(source)  # download
 
@@ -141,16 +156,16 @@ def run(
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
     vid_path, vid_writer = [None] * bs, [None] * bs
-
     # Run inference
     model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
     seen, windows, dt = 0, [], (Profile(device=device), Profile(device=device), Profile(device=device))
     for path, im, im0s, vid_cap, s in dataset:
         
         # Get input image size
-        im_height, im_width, _ = im0s.shape
+        im_height, im_width = len(im0s[0]), len(im0s[0][1])
+        # len(im0s[0]), len(im0s[0][1]) 소스가 웹캠일때
+        # im0s.shape 소스가 동영상일때
         print(f"Image Size (pixels): {im_width} x {im_height}")
-
         with dt[0]:
             im = torch.from_numpy(im).to(model.device)
             im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
@@ -209,13 +224,11 @@ def run(
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
 
-            # theta_degrees = 0
-            # vertical_distance = 0
+            
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
                 cv2.putText(im0, "detected", (im0.shape[1] - 500,im0.shape[0] - 50),  cv2.FONT_ITALIC, 2.0, (255, 0, 0), 3)
-
                 # Print results
                 for c in det[:, 5].unique():
                     n = (det[:, 5] == c).sum()  # detections per class
@@ -242,23 +255,15 @@ def run(
                         label = None if hide_labels else (names[c] if hide_conf else f"{names[c]} {conf:.2f}")
                         annotator.box_label(xyxy, label, color=colors(c, True))
                         bounding_box_center_base = xyxy[3]
-                        # bounding_box_center_y = int((xyxy[1] + xyxy[3]) / 2)
                         bounding_box_center_x = int((xyxy[0] + xyxy[2]) / 2)
-                        # bounding_box_length_x = xyxy[2] - xyxy[0]
                         bounding_box_length_y = xyxy[3] - xyxy[1]
                         gap_y = int(bounding_box_length_y / 4)
                         ROI = imc[int(xyxy[1] + gap_y * 2) :int(xyxy[3] - gap_y), int(xyxy[0]):int(xyxy[2])]
-                        # ROI = imc[int(xyxy[1]):int(xyxy[3]), int(xyxy[0]):int(xyxy[2])]
                         gray_img = cv2.cvtColor(ROI, cv2.COLOR_BGR2GRAY)
                         canny_img = cv2.Canny(gray_img, 100, 300, apertureSize = 3, L2gradient = True)
                         lines = cv2.HoughLinesP(canny_img, 1, np.pi/180, 180, minLineLength = 100, maxLineGap = 10)
                         hough_img = cv2.cvtColor(canny_img, cv2.COLOR_GRAY2BGR)
                         
-                        # if lines is not None:
-                        #     for j in range(lines.shape[0]):
-                        #         pt1 = (lines[j][0][0], lines[j][0][1])
-                        #         pt2 = (lines[j][0][2], lines[j][0][2])
-                        #         cv2.line(hough_img, pt1, pt2, (0,0,255), 2 , cv2.LINE_AA)
                         if lines is not None:
                             for u in range(len(lines) - 1, -1, -1):
                                 # Get the last line in the 'lines' array
@@ -324,6 +329,9 @@ def run(
                         save_one_box(xyxy, imc, file=save_dir / "crops" / names[c] / f"{p.stem}.jpg", BGR=True)
             cv2.putText(im0, "degree:{}".format(str(theta_degrees)), (im0.shape[1] - 500,im0.shape[0] - 100),  cv2.FONT_ITALIC, 2.0, (255, 0, 0), 3)
             # Stream results
+            # yield im0, vertical_distance, theta_degrees
+            queue.put([im0, vertical_distance, theta_degrees])
+            lets_return()
             im0 = annotator.result()
             if view_img:
                 if platform.system() == "Linux" and p not in windows:
@@ -331,7 +339,6 @@ def run(
                     cv2.namedWindow(str(p), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
                     cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
                 cv2.imshow(str(p), im0)
-                
                 cv2.waitKey(1)  
 
             # Save results (image with detections)
@@ -364,6 +371,7 @@ def run(
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
     if update:
         strip_optimizer(weights[0])  # update model (to fix SourceChangeWarning)
+    
 
 
 def parse_opt():
@@ -402,10 +410,10 @@ def parse_opt():
     return opt
 
 
+
 def main(opt):
     check_requirements(ROOT / "requirements.txt", exclude=("tensorboard", "thop"))
     run(**vars(opt))
-
 
 if __name__ == "__main__":
     opt = parse_opt()
